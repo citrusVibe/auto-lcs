@@ -1,6 +1,6 @@
 # Logitech Channel Switcher (auto-lcs)
 
-Desktop app (Python/PyQt5) running in system tray that automatically switches Logitech Unifying keyboard and mouse channels when the cursor hits a screen edge.
+Desktop app (Python/PyQt6) running in system tray that automatically switches Logitech Unifying keyboard and mouse channels when the cursor hits a screen edge.
 
 ## Architecture
 
