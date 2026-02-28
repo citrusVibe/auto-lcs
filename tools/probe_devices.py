@@ -17,6 +17,8 @@ import subprocess
 import sys
 import os
 
+VERSION = '0.5'
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 from utils import get_absolute_file_data_path, creation_flags
 
@@ -35,24 +37,29 @@ def get_hidapitester():
         return get_absolute_file_data_path('hidapitester', name)
 
 
-def hid_send_receive(exec_path, vidpid, protocol, msg):
-    """Send a HID++ message and return (success, raw_output, response_bytes)."""
-    if protocol == 'bolt':
-        if len(msg) < 20:
-            msg = msg + [0x00] * (20 - len(msg))
-        length = '20'
-        usage = '2'
-    else:
+def hid_send_receive(exec_path, vidpid, protocol, msg, force_short=False):
+    """Send a HID++ message and return (success, raw_output, response_bytes).
+
+    force_short: use short endpoint (usage 1, 7 bytes) even for Bolt.
+    """
+    if force_short or protocol != 'bolt':
         if len(msg) < 7:
             msg = msg + [0x00] * (7 - len(msg))
         length = '7'
         usage = '1'
+    else:
+        if len(msg) < 20:
+            msg = msg + [0x00] * (20 - len(msg))
+        length = '20'
+        usage = '2'
 
     hex_string = ','.join(f'0x{b:02X}' for b in msg)
     cmd = [
         exec_path, '--vidpid', vidpid,
         '--usage', usage, '--usagePage', '0xFF00', '--open',
         '--length', length, '--send-output', hex_string,
+        '--length', length, '--send-output', hex_string,
+        '--timeout', '2000',
         '--length', length, '--read-input',
     ]
     try:
@@ -63,6 +70,9 @@ def hid_send_receive(exec_path, vidpid, protocol, msg):
         response = parse_response_bytes(output)
         if response:
             return True, output, response
+        # Fallback: check if hidapitester read any bytes (even if not printed)
+        if 'read 7 bytes' in output or 'read 20 bytes' in output:
+            return True, output, None
         return False, output, None
     except subprocess.TimeoutExpired:
         return False, 'timeout', None
@@ -71,11 +81,17 @@ def hid_send_receive(exec_path, vidpid, protocol, msg):
 
 
 def parse_response_bytes(output):
-    """Extract response bytes from hidapitester read output."""
-    for line in output.split('\n'):
-        # hidapitester prints: "read N bytes:" followed by hex bytes
+    """Extract response bytes from hidapitester read output.
+
+    hidapitester format:
+        Reading N-byte input report ...read N bytes:
+         AA BB CC DD ...
+    Hex bytes are on the NEXT line after 'read N bytes:'.
+    """
+    lines = output.split('\n')
+    for i, line in enumerate(lines):
         if 'read' in line and 'bytes' in line and 'read 0 bytes' not in line:
-            # Try to find hex bytes on the same or next line
+            # Check same line after colon
             parts = line.split(':')
             if len(parts) > 1:
                 hex_part = parts[-1].strip()
@@ -84,19 +100,42 @@ def parse_response_bytes(output):
                         return [int(b, 16) for b in hex_part.split()]
                     except ValueError:
                         pass
+            # Check next line for hex bytes
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line:
+                    try:
+                        return [int(b, 16) for b in next_line.split()]
+                    except ValueError:
+                        pass
     return None
 
 
 def ping_device(exec_path, vidpid, protocol, device_index):
-    """HID++ 2.0 ping: IRoot (feature 0x00), function 1 (ping), swID=0x0F."""
-    if protocol == 'bolt':
-        # Long: [0x11, device_index, 0x00, 0x1F, 0x00, ..., 0xAA]
-        msg = [0x11, device_index, 0x00, 0x1F] + [0x00] * 15 + [0xAA]
-    else:
-        # Short: [0x10, device_index, 0x00, 0x1F, 0x00, 0x00, 0xAA]
-        msg = [0x10, device_index, 0x00, 0x1F, 0x00, 0x00, 0xAA]
+    """HID++ 2.0 ping: IRoot (feature 0x00), function 1 (ping), swID=0x0F.
 
-    return hid_send_receive(exec_path, vidpid, protocol, msg)
+    Tries short endpoint first. For Bolt, also tries long endpoint if short
+    returns no data (Bolt devices may only respond on the long endpoint).
+    """
+    # Try short ping first
+    msg_short = [0x10, device_index, 0x00, 0x1F, 0x00, 0x00, 0xAA]
+    ok, output, response = hid_send_receive(exec_path, vidpid, protocol, msg_short, force_short=True)
+    if ok:
+        # Check if it's an error response (0x8F = HID++ error, not a real device)
+        if response and len(response) >= 3 and response[2] == 0x8F:
+            return False, output, response
+        return True, output, response
+
+    # For Bolt, try long endpoint if short didn't work
+    if protocol == 'bolt':
+        msg_long = [0x11, device_index, 0x00, 0x1F] + [0x00] * 15 + [0xAA]
+        ok, output, response = hid_send_receive(exec_path, vidpid, protocol, msg_long)
+        if ok:
+            if response and len(response) >= 3 and response[2] == 0x8F:
+                return False, output, response
+            return True, output, response
+
+    return False, output, response
 
 
 def query_feature_index(exec_path, vidpid, protocol, device_index, feature_id):
@@ -115,15 +154,19 @@ def query_feature_index(exec_path, vidpid, protocol, device_index, feature_id):
 
     ok, output, response = hid_send_receive(exec_path, vidpid, protocol, msg)
     if ok and response and len(response) > 4:
-        return response[4]  # feature index
-    return None
+        return response[4], output  # feature index
+    return None, output
 
 
 def main():
     protocol = 'bolt'
     vidpid = '046D:C548'
 
+    debug = False
     args = sys.argv[1:]
+    if '--debug' in args:
+        debug = True
+        args.remove('--debug')
     if '--protocol' in args:
         idx = args.index('--protocol')
         protocol = args[idx + 1]
@@ -136,21 +179,25 @@ def main():
         vidpid = '046D:C52B'
 
     exec_path = get_hidapitester()
-    print(f'Probing receiver {vidpid} (protocol: {protocol})')
+    print(f'Probe v{VERSION} — Probing receiver {vidpid} (protocol: {protocol})')
     print(f'Using: {exec_path}')
 
-    # Step 1: Ping device indices 1-6
-    print(f'\n--- Step 1: Pinging device indices 1-6 ---\n')
+    # Step 1: Ping device indices 0-8
+    print(f'\n--- Step 1: Pinging device indices 0-8 ---\n')
     devices = []
-    for dev_idx in range(1, 7):
+    for dev_idx in range(0, 9):
         sys.stdout.write(f'\r  Pinging device index {dev_idx}...')
         sys.stdout.flush()
         ok, output, response = ping_device(exec_path, vidpid, protocol, dev_idx)
         if ok:
             sys.stdout.write(f'\r  Device index {dev_idx}: FOUND   \n')
+            if debug:
+                print(f'    Raw: {output.strip()}')
             devices.append(dev_idx)
         else:
             sys.stdout.write(f'\r  Device index {dev_idx}: -       \n')
+            if debug:
+                print(f'    Raw: {output.strip()}')
 
     if not devices:
         print('\nNo devices found. Check that:')
@@ -167,12 +214,14 @@ def main():
     for dev_idx in devices:
         sys.stdout.write(f'  Device index {dev_idx}: ')
         sys.stdout.flush()
-        feat_idx = query_feature_index(exec_path, vidpid, protocol, dev_idx, CHANGE_HOST)
+        feat_idx, query_output = query_feature_index(exec_path, vidpid, protocol, dev_idx, CHANGE_HOST)
         if feat_idx and feat_idx > 0:
             print(f'Change Host feature at index {feat_idx} (0x{feat_idx:02X})')
             results.append((dev_idx, feat_idx))
         else:
             print('Change Host feature not found')
+        if debug and query_output:
+            print(f'    Raw: {query_output.strip()}')
 
     # Summary
     print(f'\n--- Summary ---\n')
