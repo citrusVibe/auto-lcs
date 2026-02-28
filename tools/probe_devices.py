@@ -1,8 +1,11 @@
 """
-Probe Logitech Bolt/Unifying receiver to discover device slots and IDs.
+Probe Logitech Bolt/Unifying receiver to discover paired devices
+and their Change Host feature index.
 
-Sends HID++ ping packets to all slot/device combinations and reports
-which ones respond. Run from project root:
+Step 1: Ping device indices 1-6 to find paired devices.
+Step 2: Query each device for the Change Host (0x1814) feature index.
+
+Run from project root:
 
     python tools/probe_devices.py [--protocol bolt|unifying] [VID:PID]
 
@@ -32,16 +35,16 @@ def get_hidapitester():
         return get_absolute_file_data_path('hidapitester', name)
 
 
-def probe(exec_path, vidpid, protocol, slot, device_id):
-    """Send a HID++ ping to slot/device using the appropriate packet format."""
+def hid_send_receive(exec_path, vidpid, protocol, msg):
+    """Send a HID++ message and return (success, raw_output, response_bytes)."""
     if protocol == 'bolt':
-        # HID++ long message (20 bytes): [0x11, slot, device_id, 0x00, ...padding]
-        msg = [0x11, slot, device_id, 0x00, 0x00] + [0x00] * 15
+        if len(msg) < 20:
+            msg = msg + [0x00] * (20 - len(msg))
         length = '20'
         usage = '2'
     else:
-        # HID++ short message (7 bytes): [0x10, slot, device_id, 0x00, 0x00, 0x00, 0x00]
-        msg = [0x10, slot, device_id, 0x00, 0x00, 0x00, 0x00]
+        if len(msg) < 7:
+            msg = msg + [0x00] * (7 - len(msg))
         length = '7'
         usage = '1'
 
@@ -56,17 +59,64 @@ def probe(exec_path, vidpid, protocol, slot, device_id):
         result = subprocess.run(cmd, capture_output=True, text=True,
                                 timeout=3, creationflags=creation_flags)
         output = result.stdout + result.stderr
-        # Check if we got a response (read more than 0 bytes)
-        if 'read 7 bytes' in output or 'read 20 bytes' in output:
-            return True, output
-        for line in output.split('\n'):
-            if 'read' in line and 'bytes' in line and 'read 0 bytes' not in line:
-                return True, output
-        return False, output
+        # Parse response bytes from output
+        response = parse_response_bytes(output)
+        if response:
+            return True, output, response
+        return False, output, None
     except subprocess.TimeoutExpired:
-        return False, 'timeout'
+        return False, 'timeout', None
     except Exception as e:
-        return False, str(e)
+        return False, str(e), None
+
+
+def parse_response_bytes(output):
+    """Extract response bytes from hidapitester read output."""
+    for line in output.split('\n'):
+        # hidapitester prints: "read N bytes:" followed by hex bytes
+        if 'read' in line and 'bytes' in line and 'read 0 bytes' not in line:
+            # Try to find hex bytes on the same or next line
+            parts = line.split(':')
+            if len(parts) > 1:
+                hex_part = parts[-1].strip()
+                if hex_part:
+                    try:
+                        return [int(b, 16) for b in hex_part.split()]
+                    except ValueError:
+                        pass
+    return None
+
+
+def ping_device(exec_path, vidpid, protocol, device_index):
+    """HID++ 2.0 ping: IRoot (feature 0x00), function 1 (ping), swID=0x0F."""
+    if protocol == 'bolt':
+        # Long: [0x11, device_index, 0x00, 0x1F, 0x00, ..., 0xAA]
+        msg = [0x11, device_index, 0x00, 0x1F] + [0x00] * 15 + [0xAA]
+    else:
+        # Short: [0x10, device_index, 0x00, 0x1F, 0x00, 0x00, 0xAA]
+        msg = [0x10, device_index, 0x00, 0x1F, 0x00, 0x00, 0xAA]
+
+    return hid_send_receive(exec_path, vidpid, protocol, msg)
+
+
+def query_feature_index(exec_path, vidpid, protocol, device_index, feature_id):
+    """Query IRoot.getFeature(featureID) to find a feature's index.
+
+    IRoot is always at feature index 0x00, function 0 = getFeature.
+    Sends [report_id, device_index, 0x00, 0x0F, feat_hi, feat_lo, ...]
+    Response byte 4 contains the feature index (0 = not found).
+    """
+    feat_hi = (feature_id >> 8) & 0xFF
+    feat_lo = feature_id & 0xFF
+    if protocol == 'bolt':
+        msg = [0x11, device_index, 0x00, 0x0F, feat_hi, feat_lo]
+    else:
+        msg = [0x10, device_index, 0x00, 0x0F, feat_hi, feat_lo]
+
+    ok, output, response = hid_send_receive(exec_path, vidpid, protocol, msg)
+    if ok and response and len(response) > 4:
+        return response[4]  # feature index
+    return None
 
 
 def main():
@@ -85,39 +135,63 @@ def main():
     if protocol == 'unifying' and vidpid == '046D:C548':
         vidpid = '046D:C52B'
 
-    print(f'Probing receiver {vidpid} (protocol: {protocol})')
-    print(f'Using: {get_hidapitester()}')
-    print()
-
     exec_path = get_hidapitester()
-    found = []
+    print(f'Probing receiver {vidpid} (protocol: {protocol})')
+    print(f'Using: {exec_path}')
 
-    for slot in range(0x01, 0x07):
-        for dev_id in range(0x01, 0x10):
-            label = f'slot=0x{slot:02X} device_id=0x{dev_id:02X}'
-            sys.stdout.write(f'\r  Testing {label}...   ')
-            sys.stdout.flush()
-            ok, output = probe(exec_path, vidpid, protocol, slot, dev_id)
-            if ok:
-                sys.stdout.write(f'\r  FOUND: {label}      \n')
-                found.append((slot, dev_id, output))
+    # Step 1: Ping device indices 1-6
+    print(f'\n--- Step 1: Pinging device indices 1-6 ---\n')
+    devices = []
+    for dev_idx in range(1, 7):
+        sys.stdout.write(f'\r  Pinging device index {dev_idx}...')
+        sys.stdout.flush()
+        ok, output, response = ping_device(exec_path, vidpid, protocol, dev_idx)
+        if ok:
+            sys.stdout.write(f'\r  Device index {dev_idx}: FOUND   \n')
+            devices.append(dev_idx)
+        else:
+            sys.stdout.write(f'\r  Device index {dev_idx}: -       \n')
 
-    sys.stdout.write('\r' + ' ' * 60 + '\r')
-
-    if found:
-        print(f'\nFound {len(found)} responding device(s):\n')
-        for slot, dev_id, output in found:
-            print(f'  Slot: 0x{slot:02X}  Device ID: 0x{dev_id:02X}')
-            for line in output.split('\n'):
-                if 'read' in line.lower() and 'bytes' in line:
-                    print(f'    {line.strip()}')
-            print()
-    else:
-        print('\nNo devices responded. Check that:')
+    if not devices:
+        print('\nNo devices found. Check that:')
         print('  - Receiver is plugged in')
         print('  - Keyboard/mouse are on and paired')
         print(f'  - VID:PID {vidpid} is correct')
         print(f'  - Protocol "{protocol}" matches your receiver')
+        return
+
+    # Step 2: Query Change Host (0x1814) feature index for each device
+    CHANGE_HOST = 0x1814
+    print(f'\n--- Step 2: Querying Change Host (0x1814) feature index ---\n')
+    results = []
+    for dev_idx in devices:
+        sys.stdout.write(f'  Device index {dev_idx}: ')
+        sys.stdout.flush()
+        feat_idx = query_feature_index(exec_path, vidpid, protocol, dev_idx, CHANGE_HOST)
+        if feat_idx and feat_idx > 0:
+            print(f'Change Host feature at index {feat_idx} (0x{feat_idx:02X})')
+            results.append((dev_idx, feat_idx))
+        else:
+            print('Change Host feature not found')
+
+    # Summary
+    print(f'\n--- Summary ---\n')
+    print(f'  Protocol:   {protocol}')
+    print(f'  VID:PID:    {vidpid}')
+    print()
+    if results:
+        for dev_idx, feat_idx in results:
+            print(f'  Device index (RECEIVER_SLOT): {dev_idx}')
+            print(f'  Change Host feature index (DEVICE_ID): {feat_idx} (0x{feat_idx:02X})')
+            print()
+        print('Use these values in config.json:')
+        if len(results) >= 2:
+            print(f'  KB_RECEIVER_SLOT: {results[0][0]}, KEYBOARD_ID: {results[0][1]}')
+            print(f'  MS_RECEIVER_SLOT: {results[1][0]}, MOUSE_ID: {results[1][1]}')
+        elif len(results) == 1:
+            print(f'  RECEIVER_SLOT: {results[0][0]}, DEVICE_ID: {results[0][1]}')
+    else:
+        print('  No devices with Change Host support found.')
 
 
 if __name__ == '__main__':
