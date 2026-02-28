@@ -147,5 +147,5 @@ chmod +x static/uniclip/uniclip-macos-*
 **Flow triggers but devices don't switch**
 → Double-check Vendor ID, Product ID, Receiver Slots and Device IDs in Settings. Re-run `probe_devices.py` to verify.
 
-**"No module named PyQt5"**
-→ On Apple Silicon you may need: `pip install PyQt5 --config-settings --confirm-license= --verbose`
+**"No module named PyQt6"**
+→ `pip install PyQt6` (native arm64 wheels available, no build required).

@@ -78,11 +78,9 @@ Mouse ID:          0E  (feature index, not device type)
 ## Running on Windows
 
 ```powershell
-$env:QT_QPA_PLATFORM_PLUGIN_PATH="<python-path>\Lib\site-packages\PyQt5\Qt5\plugins\platforms"
+$env:QT_QPA_PLATFORM_PLUGIN_PATH="<python-path>\Lib\site-packages\PyQt6\Qt6\plugins\platforms"
 py src/main.py
 ```
-
-PyQt5 5.15.11 required (5.15.4 lacks wheels for Python 3.10+).
 
 ## Notes
 
