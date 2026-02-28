@@ -5,10 +5,10 @@ import math
 import logging
 import platform
 
-from PyQt5.QtWidgets import QApplication, QWidget
-from PyQt5.QtCore import QTimer, QThread, pyqtSignal, Qt, QPoint
-from PyQt5.QtGui import QCursor
-from PyQt5.QtTest import QTest
+from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtCore import QTimer, QThread, pyqtSignal, Qt, QPoint
+from PyQt6.QtGui import QCursor
+from PyQt6.QtTest import QTest
 from scipy import interpolate
 import numpy as np
 
@@ -120,7 +120,7 @@ class MouseEmulation:
         if not self.move_mouse_thread or not self.move_mouse_thread.isRunning():
             logger.debug("Starting mouse movement.")
             # #18: Use virtual desktop geometry (all monitors combined)
-            screen_rect = QApplication.desktop().geometry()
+            screen_rect = QApplication.primaryScreen().virtualGeometry()
             self.move_mouse_thread = MoveMouseThread(QCursor.pos(), screen_rect)
             # #7: Connect signal so cursor is moved from the GUI thread
             self.move_mouse_thread.move_cursor.connect(self._on_move_cursor)
@@ -134,4 +134,4 @@ class MouseEmulation:
             shell.SendKeys('{F15}')
         else:
             logger.debug("Simulating F15 keypress.")
-            QTest.keyPress(QWidget(), Qt.Key_F15)
+            QTest.keyPress(QWidget(), Qt.Key.Key_F15)

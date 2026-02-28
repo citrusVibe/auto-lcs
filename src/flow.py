@@ -1,9 +1,9 @@
 import platform
 import subprocess
 import time
-from PyQt5.QtCore import Qt, QTimer, QPoint, QThread, pyqtSignal
-from PyQt5.QtGui import QCursor
-from PyQt5.QtWidgets import QApplication
+from PyQt6.QtCore import Qt, QTimer, QPoint, QThread, pyqtSignal
+from PyQt6.QtGui import QCursor
+from PyQt6.QtWidgets import QApplication
 
 from settings import config
 from utils import get_absolute_file_data_path, creation_flags
@@ -92,11 +92,10 @@ def _write_to_adu(msg_str):
 
 
 class Flow:
-    def __init__(self, desktop):
+    def __init__(self, screens):
         self.timer = QTimer()
         self.timer.timeout.connect(self.check_mouse_position)
-        screen_count = desktop.screenCount()
-        screen_geometries = [desktop.screen(i).geometry() for i in range(screen_count)]
+        screen_geometries = [s.geometry() for s in screens]
         self.rightmost_edge = max([geometry.x() + geometry.width() for geometry in screen_geometries])
         self.leftmost_edge = min([geometry.x() for geometry in screen_geometries])
         self.topmost_edge = min([geometry.y() for geometry in screen_geometries])
@@ -126,7 +125,7 @@ class Flow:
         if self._switch_thread and self._switch_thread.isRunning():
             return
 
-        if config.REQUIRE_CTRL and not (QApplication.keyboardModifiers() & Qt.ControlModifier):
+        if config.REQUIRE_CTRL and not (QApplication.keyboardModifiers() & Qt.KeyboardModifier.ControlModifier):
             return
 
         mouse_pos = QCursor.pos()

@@ -1,6 +1,6 @@
-from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QDesktopWidget, QLineEdit, QInputDialog, QMessageBox
-from PyQt5.QtGui import QIcon, QPainter, QPixmap, QBrush
-from PyQt5.QtCore import Qt, QRectF
+from PyQt6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QLineEdit, QInputDialog, QMessageBox
+from PyQt6.QtGui import QIcon, QPainter, QPixmap, QBrush
+from PyQt6.QtCore import Qt, QRectF
 
 import sys
 
@@ -11,7 +11,6 @@ from settings import SettingsDialog, config, trigger_config_save
 from uniclip import Uniclip
 
 app = QApplication(sys.argv)
-desktop = QDesktopWidget()
 
 
 class SystemTrayIcon(QSystemTrayIcon):
@@ -19,7 +18,7 @@ class SystemTrayIcon(QSystemTrayIcon):
         super().__init__(icon, parent)
         self.green_circle_icon = self.create_green_circle_pixmap()
         self.menu = QMenu(parent)
-        self.flow = Flow(desktop)
+        self.flow = Flow(QApplication.screens())
         self.flow_action = self.menu.addAction('Flow')
         self.flow_action.setCheckable(True)
         self.flow_action.setChecked(False)
@@ -99,7 +98,7 @@ class SystemTrayIcon(QSystemTrayIcon):
             text, ok_pressed = QInputDialog.getText(
                 self.menu.parent(), "Connect to Clipboard Server",
                 "Enter IP and Port in the format 'IP:port':",
-                QLineEdit.Normal, config.UNICLIP_SERVER_IP
+                QLineEdit.EchoMode.Normal, config.UNICLIP_SERVER_IP
             )
             if ok_pressed and text.strip():
                 ip_port = text.strip()
@@ -143,19 +142,19 @@ class SystemTrayIcon(QSystemTrayIcon):
     def create_green_circle_pixmap(self):
         circle_diameter = 12
         pixmap = QPixmap(16, 16)
-        pixmap.fill(Qt.transparent)
+        pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(QBrush(Qt.green))
-        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(Qt.GlobalColor.green))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.drawEllipse(QRectF(
             (16 - circle_diameter) / 2, (16 - circle_diameter) / 2,
             circle_diameter, circle_diameter
         ))
         painter.end()
         painter = QPainter(pixmap)
-        painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        painter.fillRect(pixmap.rect(), Qt.green)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+        painter.fillRect(pixmap.rect(), Qt.GlobalColor.green)
         painter.end()
         return QIcon(pixmap)
 
@@ -165,4 +164,4 @@ tray_icon = SystemTrayIcon(
 
 # #1: No more infinite while-True loop catching BaseException
 tray_icon.show()
-sys.exit(app.exec_())
+sys.exit(app.exec())

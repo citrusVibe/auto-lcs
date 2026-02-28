@@ -2,9 +2,9 @@ import os
 import platform
 from pathlib import Path
 import json
-from PyQt5.QtWidgets import QDialog, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QComboBox, QPushButton, QCheckBox
-from PyQt5.QtGui import QIcon
-from PyQt5.QtCore import Qt
+from PyQt6.QtWidgets import QDialog, QLabel, QLineEdit, QVBoxLayout, QMessageBox, QComboBox, QPushButton, QCheckBox
+from PyQt6.QtGui import QIcon
+from PyQt6.QtCore import Qt
 from utils import get_absolute_file_data_path
 
 class Config:
@@ -99,7 +99,7 @@ class SettingsDialog(QDialog):
         screen_locations = ['top', 'bottom', 'right', 'left', 'none']
         self.setWindowTitle('Settings')
         self.setWindowIcon(QIcon(get_absolute_file_data_path('icon', 'icon.png')))
-        self.setWindowFlags(Qt.WindowCloseButtonHint)
+        self.setWindowFlags(Qt.WindowType.WindowCloseButtonHint)
 
         self.protocol_combo = QComboBox()
         self.protocol_combo.addItems(['bolt', 'unifying'])
@@ -242,10 +242,10 @@ class SettingsDialog(QDialog):
     def save_and_close(self):
         reply = QMessageBox.question(
             self, 'Message', 'Do you want to save the changes?',
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No, QMessageBox.StandardButton.No
         )
 
-        if reply == QMessageBox.Yes:
+        if reply == QMessageBox.StandardButton.Yes:
             # #11: Validate hex inputs before saving
             hex_fields = [
                 ('Vendor ID', self.vendor_id_edit),
