@@ -37,22 +37,34 @@ Feature index for CHANGE_HOST (0x1814) varies per device and must be discovered 
 ### Query command
 ```bash
 hidapitester --vidpid 046D:C548 --usage 2 --usagePage 0xFF00 --open \
-  --timeout 5000 --length 20 \
-  --send-output 0x11,<DEVICE_INDEX>,0x00,0x0E,0x18,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 \
-  --read-input 20
+  --length 20 \
+  --send-output 0x11,<DEVICE_INDEX>,0x00,0x0F,0x18,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 \
+  --send-output 0x11,<DEVICE_INDEX>,0x00,0x0F,0x18,0x14,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00 \
+  --timeout 2000 --length 20 --read-input
 ```
+Note: send twice to wake sleeping devices, use 2000ms timeout.
 
 ### Response format
 ```
-11 <DEVICE_INDEX> 00 0E <FEATURE_INDEX> 00 XX 00 00 ...
+11 <DEVICE_INDEX> 00 0F <FEATURE_INDEX> 00 XX 00 00 ...
 ```
 Byte 4 of the response = feature index to use in channel switch commands.
+
+### Probe tool
+
+Run `tools/probe_devices.py` to discover device indices and feature indices automatically:
+
+```bash
+python tools/probe_devices.py              # Bolt (default)
+python tools/probe_devices.py --debug      # with raw HID++ output
+python tools/probe_devices.py --protocol unifying 046D:C52B  # Unifying
+```
 
 ### Tested hardware values (Windows receiver)
 
 | Device | Receiver Slot | CHANGE_HOST Feature Index |
 |---|---|---|
-| Keyboard | `0x01` | `0x0A` |
+| Keyboard (MX Keys Mini) | `0x01` | `0x09` |
 | Mouse | `0x02` | `0x0E` |
 
 ## Settings
@@ -66,7 +78,7 @@ Vendor ID:         046D
 Product ID:        C548
 KB Receiver Slot:  01
 MS Receiver Slot:  02
-Keyboard ID:       0A  (feature index, not device type)
+Keyboard ID:       09  (feature index, not device type — MX Keys Mini)
 Mouse ID:          0E  (feature index, not device type)
 ```
 
